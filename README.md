@@ -55,7 +55,6 @@ ztunnel-under-the-hood/
 │   ├── ztunnel-emulator.go  # Receives netns FD and creates listeners
 │   ├── go.mod
 │   └── go.sum
-├── ABOUT.MD                 # Detailed technical explanation
 └── README.md               # This file
 ```
 
