@@ -1,19 +1,19 @@
-### Ztunnel Under the Hood: A Deep Dive into Istio's Ambient Mode Networking
+## Ztunnel Under the Hood: A Deep Dive into Istio's Ambient Mode Networking
 
-## What You'll Learn
+### What You'll Learn
 
 - How Istio eliminates sidecar containers while maintaining secure networking
 - The Linux kernel magic that allows processes to "teleport" between namespaces
 - Step-by-step implementation of a real-world networking concept
 - Why this approach is more efficient than traditional service mesh architectures
 
-## Background
+### Background
 
 This post explores the core networking technology behind Istio's ztunnel, a key component of its ambient mesh. Unlike the traditional sidecar model that injects a separate container into each pod, ztunnel operates as a single DaemonSet on each node. This approach allows it to handle the networking for all pods on that node, simplifying the architecture and improving efficiency.
 
 The unique part of ztunnel's design is how it intercepts and manages traffic without using the common `veth` pairs, some kind of vpn tunnel or running a full sidecar proxy. Instead, it leverages powerful, low-level Linux kernel features to directly manage sockets in the network namespace of each application pod.
 
-## Ztunnel's Kernel Magic Explained
+### Ztunnel's Kernel Magic Explained
 
 At the heart of this capability are two key Linux features:
 
@@ -25,7 +25,7 @@ The ztunnel process combines these features to "teleport" into a pod's namespace
 
 This repository serves as a practical demonstration of these exact concepts, providing a concrete example of how a process can create and manage sockets in a separate network namespace. The code in the repository is a great way to see how these advanced kernel features work in a simplified, real-world context.
 
-## The Istio Solution
+### The Istio Solution
 
 As explained in [Howard John's excellent blog post on ztunnel's architecture](https://blog.howardjohn.info/posts/ztunnel-compute-traffic-view/) and [Istio documentation](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/#:~:text=Once%20the%20istio,node%2Dlocal%20ztunnel), Istio solves this through a clever handoff mechanism:
 
@@ -37,9 +37,9 @@ As explained in [Howard John's excellent blog post on ztunnel's architecture](ht
 
 The key insight is that while sockets are created in the target namespace, they remain valid and accessible from the host namespace.
 
-## Emulating the Istio Solution for fun :) 
+### Emulating the Istio Solution for fun :) 
 
-### What This Demo Shows
+#### What This Demo Shows
 
 **Goal:** Make a process ("ztunnel") create **listeners inside a pod's netns** after a **CNI-like sender** provides a **netns file descriptor (FD)** over a **Unix Domain Socket (UDS)**—just like Istio ambient mode describes.
 
@@ -48,7 +48,7 @@ The key insight is that while sockets are created in the target namespace, they 
 - **`cni-emulator`** ⇢ the **istio-cni node agent**: opens the pod's netns file (e.g., `/var/run/netns/ns2`) and **sends that FD** to ztunnel via UDS using `SCM_RIGHTS`.
 - **`ztunnel-emulator`** ⇢ the **ztunnel proxy**: **receives the netns FD**, temporarily **`setns()` into that netns**, **binds listeners** on `127.0.0.1:{15008,15006,15001}` inside the pod netns, then returns to its own netns. The sockets remain attached to the **pod netns**.
 
-### High level Overview 
+#### High level Overview 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -96,9 +96,9 @@ The key insight is that while sockets are created in the target namespace, they 
 │  from applications running inside the pod, enabling sidecar-less networking.    │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
-## Code Overview
+### Code Overview
 
-### CNI Emulator (`cni-emulator/cni-emulator.go`)
+#### CNI Emulator (`cni-emulator/cni-emulator.go`)
 
 Simulates the `istio-cni` node agent:
 
@@ -113,7 +113,7 @@ rights := unix.UnixRights(int(f.Fd()))  // Prepare FD for transfer
 c.WriteMsgUnix([]byte{1}, rights, nil)  // Send FD via UDS
 ```
 
-### Ztunnel Emulator (`ztunnel-emulator/ztunnel-emulator.go`)
+#### Ztunnel Emulator (`ztunnel-emulator/ztunnel-emulator.go`)
 
 Simulates the ztunnel proxy:
 
@@ -131,16 +131,16 @@ unix.Setns(nsfd, unix.CLONE_NEWNET)  // Enter pod's netns
 net.Listen("tcp4", "127.0.0.1:"+port)
 ```
 
-## Walk-thru
+### Demo Walk-thru
 
 
-### Prerequisites
+#### Prerequisites
 
 - Linux system with network namespace support
 - Go 1.24+
 - Root privileges or appropriate capabilities
 
-### 1. Build the Components
+#### 1. Build the Components
 
 ```bash
 # Build CNI emulator
@@ -152,13 +152,13 @@ cd ../ztunnel-emulator
 go build -o ztunnel-emulator ztunnel-emulator.go
 ```
 
-### 2. Set Capabilities (if not running as root)
+#### 2. Set Capabilities (if not running as root)
 
 ```bash
 sudo setcap cap_sys_admin+ep ./ztunnel-emulator
 ```
 
-### 3. Create Test Network Namespace
+#### 3. Create Test Network Namespace
 
 ```bash
 $> sudo ip netns add ns2
@@ -170,7 +170,7 @@ $> sudo ip -n ns2 link show
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
 ```
 
-### 4. Start Ztunnel Emulator
+#### 4. Start Ztunnel Emulator
 
 ```bash
 $> ls -l
@@ -190,7 +190,7 @@ root     3074206 3074205  0 22:01 pts/25   00:00:00 ./ztunnel-emulator/ztunnel-e
 ukaul    3074493 3031603  0 22:01 pts/20   00:00:00 grep --color=auto --exclude-dir=.bzr --exclude-dir=CVS --exclude-dir=.git --exclude-dir=.hg --exclude-dir=.svn --exclude-dir=.idea --exclude-dir=.tox --exclude-dir=.venv --exclude-dir=venv -E -i ztunnel-emulator
 ```
 
-### 5. Send Network Namespace (CNI Step)
+#### 5. Send Network Namespace (CNI Step)
 
 ```bash
 $> sudo ip netns exec ns2 ss -ntlp
@@ -207,7 +207,7 @@ LISTEN  0       4096         127.0.0.1:15006        0.0.0.0:*     users:(("ztunn
 LISTEN  0       4096         127.0.0.1:15001        0.0.0.0:*     users:(("ztunnel-emulato",pid=3074206,fd=11)) 
 ```
 
-### 6. Verify Listeners in Pod Namespace
+#### 6. Verify Listeners in Pod Namespace
 
 ```bash
 # Launch a shell into the namesapce 
@@ -235,7 +235,7 @@ root$ nc -v -z localhost 15002
 nc: connect to localhost (127.0.0.1) port 15002 (tcp) failed: Connection refused
 ```
 
-### 7. Cleanup
+#### 7. Cleanup
 ```bash
 # Remove test namespace
 sudo ip netns delete ns2
@@ -243,7 +243,7 @@ sudo ip netns delete ns2
 # Stop ztunnel emulator
 sudo pkill ztunnel-emulator
 ```
-## References
+### References
 
 - [Istio Ambient Traffic Redirection](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/)
 - [Istio CNI-Ztunnel Communication](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/#:~:text=Once%20the%20istio,node%2Dlocal%20ztunnel)
