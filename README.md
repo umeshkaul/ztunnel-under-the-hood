@@ -32,7 +32,7 @@ As explained in [Howard John's excellent blog post on ztunnel's architecture](ht
 1. **CNI Node Agent** (`istio-cni`) opens the pod's network namespace file
 2. **CNI Node Agent** sends the network namespace file descriptor to ztunnel via Unix Domain Socket using `SCM_RIGHTS`
 3. **Ztunnel** receives the file descriptor and uses `setns()` to enter the pod's network namespace
-4. **Ztunnel** creates listening sockets on ports 15008, 15006, and 15001 inside the pod's namespace
+4. **Ztunnel** creates listening sockets inside the pod's namespace
 5. **Ztunnel** returns to its original namespace while the sockets remain bound to the pod's namespace
 
 The key insight is that while sockets are created in the target namespace, they remain valid and accessible from the host namespace.
@@ -245,10 +245,15 @@ sudo pkill ztunnel-emulator
 ```
 ### References
 
-- [Istio Ambient Traffic Redirection](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/)
-- [Istio CNI-Ztunnel Communication](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/#:~:text=Once%20the%20istio,node%2Dlocal%20ztunnel)
-- [Unix Domain Sockets and File Descriptor Passing](https://man7.org/linux/man-pages/man7/unix.7.html)
-- [Network Namespaces](https://man7.org/linux/man-pages/man7/namespaces.7.html)
-- https://blog.howardjohn.info/posts/ztunnel-compute-traffic-view/
-- https://www.solo.io/blog/understanding-istio-ambient-ztunnel-and-secure-overlay
-- https://istio.io/latest/blog/2023/rust-based-ztunnel/
+Basics :
+
+- [Unix Domain Sockets and File Descriptor Passing](https://man7.org/linux/man-pages/man7/unix.7.html) - Linux manual page explaining UDS and SCM_RIGHTS for FD transfer
+- [Network Namespaces](https://man7.org/linux/man-pages/man7/namespaces.7.html) - Linux manual page covering network namespace concepts and setns() system call
+
+Istio Specific :
+
+- [Istio Ambient Traffic Redirection](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/) - Official Istio documentation on ambient mode traffic redirection mechanisms
+- [Istio CNI-Ztunnel Communication](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/#:~:text=Once%20the%20istio,node%2Dlocal%20ztunnel) - Detailed explanation of how CNI and ztunnel communicate via file descriptors
+- [Howard John's Ztunnel Architecture Blog](https://blog.howardjohn.info/posts/ztunnel-compute-traffic-view/) - Deep dive into ztunnel's compute traffic view and namespace management
+- [Understanding Istio Ambient Ztunnel and Secure Overlay](https://www.solo.io/blog/understanding-istio-ambient-ztunnel-and-secure-overlay) - Comprehensive overview of ambient mode architecture and security model
+- [Istio's Rust-based Ztunnel](https://istio.io/latest/blog/2023/rust-based-ztunnel/) - Announcement and technical details of Istio's migration to Rust-based ztunnel implementation
