@@ -1,39 +1,33 @@
-# Ztunnel Under the Hood
+### Ztunnel Under the Hood: A Deep Dive into Istio's Ambient Mode Networking
 
-A demonstration of how Istio's ambient mode CNI-ztunnel-pod communication works, specifically focusing on how Ztunnel pod routes traffic between pods in different namespaces without creating tunnels. 
+## What You'll Learn
+
+- How Istio eliminates sidecar containers while maintaining secure networking
+- The Linux kernel magic that allows processes to "teleport" between namespaces
+- Step-by-step implementation of a real-world networking concept
+- Why this approach is more efficient than traditional service mesh architectures
 
 ## Background
 
-I started with a fundamental question about Istio's ambient mode: *"How does ztunnel route traffic between pods running in different namespaces on the same node over mTLS without having sidecars?"* 
+This post explores the core networking technology behind Istio's ztunnel, a key component of its ambient mesh. Unlike the traditional sidecar model that injects a separate container into each pod, ztunnel operates as a single DaemonSet on each node. This approach allows it to handle the networking for all pods on that node, simplifying the architecture and improving efficiency.
 
-In traditional service mesh architectures, each application pod runs a sidecar proxy to handle traffic interception, encryption, and routing. However, Istio's ambient mode introduces **ztunnel**, a per-node proxy that eliminates the need for sidecars while still ensuring secure mTLS communication.
+The unique part of ztunnel's design is how it intercepts and manages traffic without using the common `veth` pairs, some kind of vpn tunnel or running a full sidecar proxy. Instead, it leverages powerful, low-level Linux kernel features to directly manage sockets in the network namespace of each application pod.
 
-This raises an intriguing architectural question: **How does ztunnel, which runs in its own network namespace as a single pod on the node, manage to intercept and route mTLS traffic for multiple application pods residing in separate network namespaces?**
+## Ztunnel's Kernel Magic Explained
 
-As explained in [Howard John's excellent blog post on ztunnel's architecture](https://blog.howardjohn.info/posts/ztunnel-compute-traffic-view/),the key insight is that ztunnel achieves this by temporarily entering the network namespace of each pod it manages to open listening sockets within those namespaces. This allows ztunnel to handle traffic as if it were operating within each pod's network environment.
+At the heart of this capability are two key Linux features:
 
-My question then became: *"How can I simulate this network namespace handoff mechanism with simple Go code?"* The answer involves two programs:
+**Network Namespaces:** The Linux kernel isolates the network stack of each pod into a separate network namespace. These namespaces are treated as kernel objects and can be referenced.
 
-* One acts like the **CNI node agent**, opening the pod's netns file and sending that file descriptor to ztunnel via Unix Domain Socket
-* The other acts like **ztunnel**, receiving the file descriptor, using `setns()` to enter the pod's namespace, and binding listeners inside it
+**`setns()` System Call:** A privileged process, like ztunnel's node agent, can use the `setns()` system call to temporarily enter another process's namespace.
 
-This is exactly what I'm demonstrating below: showing how the CNI-ztunnel handoff enables a single process to create sockets inside multiple pod namespaces, enabling the sidecar-less mTLS architecture that makes Istio ambient mode so powerful.
+The ztunnel process combines these features to "teleport" into a pod's namespace, create the necessary listening sockets, and then return to its own namespace. Because the sockets are "pinned" to the pod's namespace, they remain active and functional there. This allows ztunnel to listen for and redirect traffic to the pod's workload without the need for a sidecar container. Traffic redirection is then handled by other kernel features like iptables TPROXY or eBPF.
 
-## The Core Problem
-
-The challenge ztunnel faces is architectural: **How can a single process running in one network namespace create listening sockets inside multiple other network namespaces?**
-
-This is crucial for Istio ambient mode because:
-- Ztunnel runs as a single pod per node in its own network namespace
-- Application pods run in separate, isolated network namespaces  
-- All inter-pod traffic must be mTLS-encrypted, even between pods on the same node
-- Ztunnel needs to intercept traffic from each pod as if it were a sidecar within that pod
-
-The fundamental constraint is that **sockets always belong to the namespace in which they are created**. You can't simply tell a process running in the host namespace to "go listen on port 15006 inside that pod's namespace" — the process needs to actually be inside that namespace when it creates the socket.
+This repository serves as a practical demonstration of these exact concepts, providing a concrete example of how a process can create and manage sockets in a separate network namespace. The code in the repository is a great way to see how these advanced kernel features work in a simplified, real-world context.
 
 ## The Istio Solution
 
-As described in the [Istio documentation](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/#:~:text=Once%20the%20istio,node%2Dlocal%20ztunnel), Istio solves this through a clever handoff mechanism:
+As explained in [Howard John's excellent blog post on ztunnel's architecture](https://blog.howardjohn.info/posts/ztunnel-compute-traffic-view/) and [Istio documentation](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/#:~:text=Once%20the%20istio,node%2Dlocal%20ztunnel), Istio solves this through a clever handoff mechanism:
 
 1. **CNI Node Agent** (`istio-cni`) opens the pod's network namespace file
 2. **CNI Node Agent** sends the network namespace file descriptor to ztunnel via Unix Domain Socket using `SCM_RIGHTS`
@@ -43,30 +37,66 @@ As described in the [Istio documentation](https://istio.io/latest/docs/ambient/a
 
 The key insight is that while sockets are created in the target namespace, they remain valid and accessible from the host namespace.
 
-## Repository Structure
+## Emulating the Istio Solution for fun :) 
 
-```
-ztunnel-under-the-hood/
-├── cni-emulator/            # CNI node agent simulation
-│   ├── cni-emulator.go      # Opens netns file and sends FD via UDS
-│   ├── go.mod
-│   └── go.sum
-├── ztunnel-emulator/        # Ztunnel proxy simulation  
-│   ├── ztunnel-emulator.go  # Receives netns FD and creates listeners
-│   ├── go.mod
-│   └── go.sum
-└── README.md               # This file
-```
-
-## What This Demo Shows
+### What This Demo Shows
 
 **Goal:** Make a process ("ztunnel") create **listeners inside a pod's netns** after a **CNI-like sender** provides a **netns file descriptor (FD)** over a **Unix Domain Socket (UDS)**—just like Istio ambient mode describes.
 
 **Mapping:**
+
 - **`cni-emulator`** ⇢ the **istio-cni node agent**: opens the pod's netns file (e.g., `/var/run/netns/ns2`) and **sends that FD** to ztunnel via UDS using `SCM_RIGHTS`.
 - **`ztunnel-emulator`** ⇢ the **ztunnel proxy**: **receives the netns FD**, temporarily **`setns()` into that netns**, **binds listeners** on `127.0.0.1:{15008,15006,15001}` inside the pod netns, then returns to its own netns. The sockets remain attached to the **pod netns**.
 
-## Components
+### High level Overview 
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              DEMO OVERVIEW                                      │
+│                    (How CNI-ztunnel Handoff Works)                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   CNI Agent     │    │  Ztunnel        │    │  Pod Namespace  │
+│   (cni-emulator)│    │  (ztunnel-emul.)│    │     (ns2)       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │ 1. Open /var/run/     │                       │
+         │    netns/ns2          │                       │
+         │                       │                       │
+         │ 2. Send FD via UDS    │                       │
+         │    SCM_RIGHTS         │                       │
+         ├──────────────────────▶│                       │
+         │                       │                       │
+         │                       │ 3. setns() into ns2   │
+         │                       ├──────────────────────▶│
+         │                       │                       │
+         │                       │ 4. Create listeners   │
+         │                       │    127.0.0.1:15008    │
+         │                       │    127.0.0.1:15006    │
+         │                       │    127.0.0.1:15001    │
+         │                       │                       │
+         │                       │ 5. Return to host NS  │
+         │                       │◀──────────────────────┤
+         │                       │                       │
+         │                       │                       │
+         │                       │                       ▼
+         │                       │              ┌─────────────────┐
+         │                       │              │ Listeners stay  │
+         │                       │              │ in pod namespace│
+         │                       │              │ (sockets remain │
+         │                       │              │  bound to ns2)  │
+         │                       │              └─────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              KEY RESULT                                         │
+│                                                                                 │
+│  Ztunnel process (running in host namespace) now has active listeners           │
+│  inside the pod's namespace (ns2). These listeners can accept connections       │
+│  from applications running inside the pod, enabling sidecar-less networking.    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+## Code Overview
 
 ### CNI Emulator (`cni-emulator/cni-emulator.go`)
 
@@ -101,23 +131,14 @@ unix.Setns(nsfd, unix.CLONE_NEWNET)  // Enter pod's netns
 net.Listen("tcp4", "127.0.0.1:"+port)
 ```
 
-## Test
+## Walk-thru
+
 
 ### Prerequisites
 
 - Linux system with network namespace support
 - Go 1.24+
 - Root privileges or appropriate capabilities
-
-
-## Expected Output
-
-When successful, you should see:
-
-1. **Ztunnel output**: `listeners ready`
-2. **Socket listing**: Shows listeners on ports 15008, 15006, 15001 in the pod namespace
-3. **Test connection**: Returns "ok" when connecting to any of the ports
-
 
 ### 1. Build the Components
 
@@ -214,10 +235,20 @@ root$ nc -v -z localhost 15002
 nc: connect to localhost (127.0.0.1) port 15002 (tcp) failed: Connection refused
 ```
 
+### 7. Cleanup
+```bash
+# Remove test namespace
+sudo ip netns delete ns2
 
+# Stop ztunnel emulator
+sudo pkill ztunnel-emulator
+```
 ## References
 
 - [Istio Ambient Traffic Redirection](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/)
 - [Istio CNI-Ztunnel Communication](https://istio.io/latest/docs/ambient/architecture/traffic-redirection/#:~:text=Once%20the%20istio,node%2Dlocal%20ztunnel)
 - [Unix Domain Sockets and File Descriptor Passing](https://man7.org/linux/man-pages/man7/unix.7.html)
 - [Network Namespaces](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+- https://blog.howardjohn.info/posts/ztunnel-compute-traffic-view/
+- https://www.solo.io/blog/understanding-istio-ambient-ztunnel-and-secure-overlay
+- https://istio.io/latest/blog/2023/rust-based-ztunnel/
