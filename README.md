@@ -50,6 +50,8 @@ The key insight is that while sockets are created in the target namespace, they 
 
 #### High level Overview 
 
+![Ztunnel CNI Handoff Flow](ztunnel-flow-diagram.png)
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              DEMO OVERVIEW                                      │
