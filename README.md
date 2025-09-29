@@ -52,52 +52,7 @@ The key insight is that while sockets are created in the target namespace, they 
 
 ![Ztunnel CNI Handoff Flow](ztunnel-flow-diagram.png)
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              DEMO OVERVIEW                                      │
-│                    (How CNI-ztunnel Handoff Works)                              │
-└─────────────────────────────────────────────────────────────────────────────────┘
 
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   CNI Agent     │    │  Ztunnel        │    │  Pod Namespace  │
-│   (cni-emulator)│    │  (ztunnel-emul.)│    │     (ns2)       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │ 1. Open /var/run/     │                       │
-         │    netns/ns2          │                       │
-         │                       │                       │
-         │ 2. Send FD via UDS    │                       │
-         │    SCM_RIGHTS         │                       │
-         ├──────────────────────▶│                       │
-         │                       │                       │
-         │                       │ 3. setns() into ns2   │
-         │                       ├──────────────────────▶│
-         │                       │                       │
-         │                       │ 4. Create listeners   │
-         │                       │    127.0.0.1:15008    │
-         │                       │    127.0.0.1:15006    │
-         │                       │    127.0.0.1:15001    │
-         │                       │                       │
-         │                       │ 5. Return to host NS  │
-         │                       │◀──────────────────────┤
-         │                       │                       │
-         │                       │                       │
-         │                       │                       ▼
-         │                       │              ┌─────────────────┐
-         │                       │              │ Listeners stay  │
-         │                       │              │ in pod namespace│
-         │                       │              │ (sockets remain │
-         │                       │              │  bound to ns2)  │
-         │                       │              └─────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              KEY RESULT                                         │
-│                                                                                 │
-│  Ztunnel process (running in host namespace) now has active listeners           │
-│  inside the pod's namespace (ns2). These listeners can accept connections       │
-│  from applications running inside the pod, enabling sidecar-less networking.    │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
 ### Code Overview
 
 #### CNI Emulator (`cni-emulator/cni-emulator.go`)
